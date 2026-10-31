@@ -22,7 +22,7 @@ from langchain_core.messages import (
     AIMessage,
     SystemMessage,
 )
-from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 
 
 from mcp_client import (
@@ -35,32 +35,32 @@ from mcp_client import (
 
 
 def get_database_url():
+    """
+    Retrieve the PostgreSQL connection URL.
+
+    Supports both:
+    - Local PostgreSQL (without SSL)
+    - Cloud PostgreSQL (with SSL when configured)
+    """
+
     database_url = os.getenv("DATABASE_URL")
 
     if not database_url:
         raise ValueError(
             "DATABASE_URL is missing. "
-            "Please add your Render PostgreSQL External Database URL to .env"
+            "Please configure it in your .env file."
         )
-
-    if "sslmode=" not in database_url:
-        separator = "&" if "?" in database_url else "?"
-        database_url = f"{database_url}{separator}sslmode=require"
 
     return database_url
 
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY is missing. Please add it to your .env file.")
-
 # =========================
-# LLM - original model kept
+# Local LLM - Ollama
 # =========================
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=GROQ_API_KEY,
+
+llm = ChatOllama(
+    model="qwen2:7b",
+    base_url="http://localhost:11434",
+    temperature=0,
 )
 
 # =========================
@@ -493,6 +493,20 @@ If exact live prices are unavailable, clearly label estimates as approximate.
 # =========================
 def itinerary_agent(state: TravelState):
     prompt = f"""
+    Previous Draft:
+{state.get('itinerary', '')}
+
+Human Feedback:
+{state.get('human_feedback', '')}
+
+IMPORTANT REVISION RULES:
+- If human feedback exists, revise the previous draft.
+- Address every requested change.
+- Do not simply repeat the previous itinerary.
+- Recalculate the estimated budget.
+- If the trip exceeds the user's budget, state that clearly.
+- Do not claim the trip is within budget unless the costs support it.
+
 Create a complete travel itinerary.
 
 User Query:
@@ -712,7 +726,21 @@ graph.add_conditional_edges(
 )
 
 graph.add_edge("itinerary_agent", "human_approval")
-graph.add_edge("human_approval", "final_agent")
+def route_after_human_review(state: TravelState):
+    if state.get("approved", False):
+        return "final_agent"
+
+    return "itinerary_agent"
+
+
+graph.add_conditional_edges(
+    "human_approval",
+    route_after_human_review,
+    {
+        "final_agent": "final_agent",
+        "itinerary_agent": "itinerary_agent",
+    },
+)
 graph.add_edge("final_agent", END)
 graph.add_edge("guardrail_blocked", END)
 

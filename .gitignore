@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local IDE settings
+.vscode/
+.idea/
+
+# Additional local environment files
+.env.*
+!.env.example
